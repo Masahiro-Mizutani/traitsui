@@ -1,8 +1,10 @@
+from functools import partial
+
 from pyface.qt import QtCore, QtGui
 from traitsui.toolkit import toolkit
 
 
-class MyBadWidget(QtGui.QLabel):
+class MyBadWidget(QtGui.QPushButton):
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -12,8 +14,13 @@ class MyBadWidget(QtGui.QLabel):
         # when we construct a structure.
         self.editor = None
         self.setText("Test")
+        policy = self.sizePolicy()
+        policy.setVerticalPolicy(QtGui.QSizePolicy.Expanding)
+        policy.setHorizontalPolicy(QtGui.QSizePolicy.Expanding)
+        self.setSizePolicy(policy)
 
     def sizeHint(self):
+        print(f"{self} sizeHint is called")
         if self.editor.disposed:
             raise RuntimeError("Uhoh")
         return super().sizeHint()
@@ -34,6 +41,14 @@ class MyDialog(QtGui.QDialog):
         return super().event(event)
 
 
+def dispose_widget(widget):
+    print(widget.editor)
+    widget.editor.disposed = True
+    widget.blockSignals(True)
+    widget.hide()
+    widget.deleteLater()
+
+
 app = QtGui.QApplication([])
 
 
@@ -43,13 +58,18 @@ class FakeEditor:
         self.disposed = False
 
 
+editor1 = FakeEditor()
+editor2 = FakeEditor()
+editor3 = FakeEditor()
+print(editor1, editor2, editor3)
+
 STRUCTURE = (
-    MyDialog, FakeEditor(), [
+    MyDialog, editor1, [
         (
-            MyBadWidget, FakeEditor(), [],
+            MyBadWidget, editor2, [],
         ),
         (
-            MyBadWidget, FakeEditor(), [
+            MyBadWidget, editor3, [
                 # All these widgets share the same editor.
                 (MyBadWidget, None, []),
                 (MyBadWidget, None, [
@@ -71,6 +91,10 @@ def create_content(widget_class, children_structures, parent, editor):
     new_widget = widget_class()
     new_widget.editor = editor
 
+    if isinstance(new_widget, QtGui.QPushButton):
+        new_widget.setText(repr(editor))
+        new_widget.clicked.connect(partial(dispose_widget, new_widget))
+
     layout.addWidget(new_widget)
 
     splitter = QtGui.QSplitter(QtCore.Qt.Horizontal)
@@ -83,6 +107,7 @@ def create_content(widget_class, children_structures, parent, editor):
             child_class, substructures, parent=parent, editor=child_editor,
         )
         splitter.addWidget(child)
+        child.setParent(splitter)
     return parent
 
 
@@ -96,8 +121,10 @@ main = create_structure(STRUCTURE)
 main.show()
 toolkit().print_children(main)
 
-main.deleteLater()
-app.processEvents()
+# main.hide()
+# main.deleteLater()
+# main.close()
+# app.processEvents()
 app.exec_()
 
 

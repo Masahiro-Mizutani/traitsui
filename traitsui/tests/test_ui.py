@@ -254,6 +254,10 @@ class TestUI(unittest.TestCase):
 ToolkitSpecificEditor = toolkit_object("editor:Editor")
 
 
+def get_event_name(event):
+    from pyface.qt import QtCore
+
+
 if is_qt():
 
     # The following code is typical in Qt editors and looks reasonable.
@@ -269,8 +273,17 @@ if is_qt():
             self._some_editor = editor
 
         def sizeHint(self):
-            assert self._some_editor.factory is not None
+            if self._some_editor.factory is None:
+                hint = "  <-------- HERE"
+            else:
+                hint = ""
+            parent = self.parent()
+            print(f"{self} sizeHint is called. factory is {self._some_editor.factory} {hint}, parent is {parent}")
             return super().sizeHint()
+
+        def event(self, event):
+            print(self, event)
+            return super().event(event)
 
     class EditorWithCustomWidget(ToolkitSpecificEditor):
 
@@ -291,11 +304,22 @@ if is_qt():
                 kind="subpanel",
                 view=View(Item("_", label="DUMMY"), width=100, height=100),
             )
+            print("nested UI control", self._ui.control)
+            self._filter = _EventFilter()
+            self._ui.control.installEventFilter(self._filter)
             self.control.addWidget(self._ui.control)
+
+            button = QtGui.QPushButton()
+            button.setText("Close UI")
+            self.control.addWidget(button)
+            button.clicked.connect(self._on_clicked)
 
         def dispose(self):
             self._ui.dispose()
             super().dispose()
+
+        def _on_clicked(self):
+            self._ui.dispose()
 
         def update_editor(self):
             pass
@@ -372,14 +396,27 @@ class TestUIDispose(unittest.TestCase):
                 ),
             ),
         )
-        with reraise_exceptions():
+        ui = obj.edit_traits(view=view)
+        filter_ = _EventFilter()
+        ui.control.installEventFilter(filter_)
+        from pyface.api import GUI
+        GUI().start_event_loop()
+        # with reraise_exceptions():
 
-            # create_ui is useful for other tests but not this one: it
-            # flushes the event loop prior to calling dispose. Here we want
-            # to test even if the event loop is not flushed before calling
-            # dispose, it would still be okay at the end.
-            ui = obj.edit_traits(view=view)
-            try:
-                ui.dispose()
-            finally:
-                process_cascade_events()
+        #     # create_ui is useful for other tests but not this one: it
+        #     # flushes the event loop prior to calling dispose. Here we want
+        #     # to test even if the event loop is not flushed before calling
+        #     # dispose, it would still be okay at the end.
+        #     ui = obj.edit_traits(view=view)
+        #     filter_ = _EventFilter()
+        #     ui.control.installEventFilter(filter_)
+        #     try:
+        #         ui.dispose()
+        #     finally:
+        #         process_cascade_events()
+
+
+class _EventFilter(QtCore.QObject):
+    def eventFilter(self, source, event):
+        print(source, event)
+        return super().eventFilter(source, event)
