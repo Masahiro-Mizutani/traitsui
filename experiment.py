@@ -6,11 +6,13 @@ class MyBadWidget(QtGui.QLabel):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.is_disposed = []
+
+        # This list emulates shared mutable states on an editor
+        self.editor_disposed = []
         self.setText("Test")
 
     def sizeHint(self):
-        if self.is_disposed:
+        if self.editor_disposed:
             raise RuntimeError("Uhoh")
         return super().sizeHint()
 
@@ -32,21 +34,6 @@ class MyDialog(QtGui.QDialog):
 
 app = QtGui.QApplication([])
 
-
-def create_widget(klass=MyDialog, n_widgets=3, parent=None):
-    is_disposed = []
-    main = klass(parent)
-    layout = QtGui.QVBoxLayout()
-    main.setLayout(layout)
-
-    splitter = QtGui.QSplitter(QtCore.Qt.Horizontal)
-    splitter.setStretchFactor(0, 2)
-    layout.addWidget(splitter)
-
-    widgets = [MyBadWidget() for _ in range(n_widgets)]
-    for widget in widgets:
-        splitter.addWidget(widget)
-    return main, layout, widgets[-1] if widgets else None
 
 
 STRUCTURE = (
@@ -70,9 +57,11 @@ STRUCTURE = (
 
 
 def create_content(widget_class, children_structures, parent=None):
-    new_widget = QtGui.QWidget(parent=parent)
-    layout = QtGui.QVBoxLayout(new_widget)
-    layout.addWidget(widget_class())
+    parent = QtGui.QWidget(parent=parent)
+    layout = QtGui.QVBoxLayout(parent)
+
+    new_widget = widget_class()
+    layout.addWidget(new_widget)
 
     splitter = QtGui.QSplitter(QtCore.Qt.Horizontal)
     splitter.setStretchFactor(0, 2)
@@ -80,10 +69,12 @@ def create_content(widget_class, children_structures, parent=None):
 
     children = []
     for child_class, substructures in children_structures:
-        child, _ = create_content(child_class, substructures, parent=new_widget)
+        child, _ = create_content(
+            child_class, substructures, parent=parent
+        )
         children.append(child)
         splitter.addWidget(child)
-    return new_widget, children
+    return parent, children
 
 
 def create_structure(structure, parent_class=None):
@@ -91,7 +82,12 @@ def create_structure(structure, parent_class=None):
     return create_content(parent_class, substructures)
 
 
-main = create_structure(STRUCTURE)
+main, children = create_structure(STRUCTURE)
+
+for child in children:
+    print("-----child-----", child)
+    toolkit().print_children(child)
+
 main.show()
 toolkit().print_children(main)
 
