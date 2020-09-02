@@ -8,11 +8,13 @@ class MyBadWidget(QtGui.QLabel):
         super().__init__(parent)
 
         # This list emulates shared mutable states on an editor
-        self.editor_disposed = []
+        # Hack: this gets set to an instance of FakeEditor
+        # when we construct a structure.
+        self.editor = None
         self.setText("Test")
 
     def sizeHint(self):
-        if self.editor_disposed:
+        if self.editor.disposed:
             raise RuntimeError("Uhoh")
         return super().sizeHint()
 
@@ -35,19 +37,25 @@ class MyDialog(QtGui.QDialog):
 app = QtGui.QApplication([])
 
 
+class FakeEditor:
+
+    def __init__(self):
+        self.disposed = False
+
 
 STRUCTURE = (
-    MyDialog, [
+    MyDialog, FakeEditor(), [
         (
-            MyBadWidget, []
+            MyBadWidget, FakeEditor(), [],
         ),
         (
-            MyBadWidget, [
-                (MyBadWidget, []),
-                (MyBadWidget, [
-                    (MyBadWidget, [
-                        (MyBadWidget, []),
-                        (MyBadWidget, []),
+            MyBadWidget, FakeEditor(), [
+                # All these widgets share the same editor.
+                (MyBadWidget, None, []),
+                (MyBadWidget, None, [
+                    (MyBadWidget, None, [
+                        (MyBadWidget, None, []),
+                        (MyBadWidget, None, []),
                     ])
                 ]),
             ],
@@ -56,37 +64,34 @@ STRUCTURE = (
 )
 
 
-def create_content(widget_class, children_structures, parent=None):
+def create_content(widget_class, children_structures, parent, editor):
     parent = QtGui.QWidget(parent=parent)
     layout = QtGui.QVBoxLayout(parent)
 
     new_widget = widget_class()
+    new_widget.editor = editor
+
     layout.addWidget(new_widget)
 
     splitter = QtGui.QSplitter(QtCore.Qt.Horizontal)
     splitter.setStretchFactor(0, 2)
     layout.addWidget(splitter)
 
-    children = []
-    for child_class, substructures in children_structures:
-        child, _ = create_content(
-            child_class, substructures, parent=parent
+    for child_class, new_editor, substructures in children_structures:
+        child_editor = new_editor if new_editor is not None else editor
+        child = create_content(
+            child_class, substructures, parent=parent, editor=child_editor,
         )
-        children.append(child)
         splitter.addWidget(child)
-    return parent, children
+    return parent
 
 
 def create_structure(structure, parent_class=None):
-    parent_class, substructures = structure
-    return create_content(parent_class, substructures)
+    parent_class, editor, substructures = structure
+    return create_content(parent_class, substructures, parent=None, editor=editor)
 
 
-main, children = create_structure(STRUCTURE)
-
-for child in children:
-    print("-----child-----", child)
-    toolkit().print_children(child)
+main = create_structure(STRUCTURE)
 
 main.show()
 toolkit().print_children(main)
