@@ -4,7 +4,7 @@ from pyface.qt import QtCore, QtGui
 from traitsui.toolkit import toolkit
 
 
-class MyBadWidget(QtGui.QPushButton):
+class MyBadWidget(QtGui.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -13,11 +13,20 @@ class MyBadWidget(QtGui.QPushButton):
         # Hack: this gets set to an instance of FakeEditor
         # when we construct a structure.
         self.editor = None
-        self.setText("Test")
-        policy = self.sizePolicy()
-        policy.setVerticalPolicy(QtGui.QSizePolicy.Expanding)
-        policy.setHorizontalPolicy(QtGui.QSizePolicy.Expanding)
-        self.setSizePolicy(policy)
+        self._inner = QtGui.QVBoxLayout()
+        self.setLayout(self._inner)
+        self._button = QtGui.QPushButton()
+        self._button.setText("Close Editor")
+        self._button.clicked.connect(self._dispose)
+        self._inner.addWidget(self._button)
+
+        # policy = self.sizePolicy()
+        # policy.setVerticalPolicy(QtGui.QSizePolicy.Expanding)
+        # policy.setHorizontalPolicy(QtGui.QSizePolicy.Expanding)
+        # self.setSizePolicy(policy)
+
+    def _dispose(self):
+        self.editor.dispose()
 
     def sizeHint(self):
         print(f"{self} sizeHint is called")
@@ -26,8 +35,9 @@ class MyBadWidget(QtGui.QPushButton):
         return super().sizeHint()
 
     def event(self, event):
-        print(self, event)
-        return super().event(event)
+        result = super().event(event)
+        print(self, event, "hidden state: ", self.isHidden(), "visibility: ", self.isVisible())
+        return result
 
 
 class MyDialog(QtGui.QDialog):
@@ -41,12 +51,11 @@ class MyDialog(QtGui.QDialog):
         return super().event(event)
 
 
-def dispose_widget(widget):
-    print(widget.editor)
-    widget.editor.disposed = True
-    widget.blockSignals(True)
-    widget.hide()
-    widget.deleteLater()
+def _size_hint_wrapper(original_size_hint):
+
+    def sizeHint():
+        return original_size_hint()
+    return sizeHint
 
 
 app = QtGui.QApplication([])
@@ -56,12 +65,21 @@ class FakeEditor:
 
     def __init__(self):
         self.disposed = False
+        self.main_widget = None
+
+    def dispose(self):
+        self.disposed = True
+        if self.main_widget is not None:
+            self.main_widget.hide()
+            self.main_widget.deleteLater()
+            self.main_widget = None
 
 
 editor1 = FakeEditor()
 editor2 = FakeEditor()
 editor3 = FakeEditor()
-print(editor1, editor2, editor3)
+editor4 = FakeEditor()
+editors = [editor1, editor2, editor3, editor4]
 
 STRUCTURE = (
     MyDialog, editor1, [
@@ -72,7 +90,7 @@ STRUCTURE = (
             MyBadWidget, editor3, [
                 # All these widgets share the same editor.
                 (MyBadWidget, None, []),
-                (MyBadWidget, None, [
+                (MyBadWidget, editor4, [
                     (MyBadWidget, None, [
                         (MyBadWidget, None, []),
                         (MyBadWidget, None, []),
@@ -90,10 +108,7 @@ def create_content(widget_class, children_structures, parent, editor):
 
     new_widget = widget_class()
     new_widget.editor = editor
-
-    if isinstance(new_widget, QtGui.QPushButton):
-        new_widget.setText(repr(editor))
-        new_widget.clicked.connect(partial(dispose_widget, new_widget))
+    new_widget.sizeHint = _size_hint_wrapper(new_widget.sizeHint)
 
     layout.addWidget(new_widget)
 
@@ -106,6 +121,8 @@ def create_content(widget_class, children_structures, parent, editor):
         child = create_content(
             child_class, substructures, parent=parent, editor=child_editor,
         )
+        if new_editor is not None:
+            new_editor.main_widget = child
         splitter.addWidget(child)
         child.setParent(splitter)
     return parent

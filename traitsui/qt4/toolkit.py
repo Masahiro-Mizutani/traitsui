@@ -394,6 +394,9 @@ class GUIToolkit(Toolkit):
             if isinstance(w, QtGui.QWidget):
                 self.print_children(w, indent=indent + " " * 4)
 
+    def close_control(self, control):
+        return control.close()
+
     def destroy_control(self, control):
         """ Destroys a specified GUI toolkit control.
         """

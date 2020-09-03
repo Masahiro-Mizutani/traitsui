@@ -19,6 +19,7 @@ Test cases for the UI object.
 
 import unittest
 
+from pyface.api import GUI
 from traits.api import Property
 from traits.has_traits import HasTraits, HasStrictTraits
 from traits.trait_types import Str, Int
@@ -37,7 +38,7 @@ from traitsui.tests._tools import (
     reraise_exceptions,
     ToolkitName,
 )
-from traitsui.toolkit import toolkit_object
+from traitsui.toolkit import toolkit, toolkit_object
 
 
 class FooDialog(HasTraits):
@@ -266,7 +267,7 @@ if is_qt():
 
     from pyface.qt import QtGui, QtCore
 
-    class CustomWidget(QtGui.QLabel):
+    class CustomWidget(QtGui.QWidget):
 
         def __init__(self, editor, parent=None):
             super(CustomWidget, self).__init__()
@@ -279,11 +280,13 @@ if is_qt():
                 hint = ""
             parent = self.parent()
             print(f"{self} sizeHint is called. factory is {self._some_editor.factory} {hint}, parent is {parent}")
+            assert self._some_editor.factory is not None
             return super().sizeHint()
 
         def event(self, event):
-            print(self, event)
-            return super().event(event)
+            result = super().event(event)
+            print(self, get_qt_event_name(event), "hidden state: ", self.isHidden(), "visibility: ", self.isVisible())
+            return result
 
     class EditorWithCustomWidget(ToolkitSpecificEditor):
 
@@ -296,30 +299,51 @@ if is_qt():
             # ... adjust to fit the layout. These do not happen if the widgets
             # are made to be hidden first before dispose is called.
             self.control = QtGui.QSplitter(QtCore.Qt.Horizontal)
+
             widget = CustomWidget(editor=self)
             self.control.addWidget(widget)
             self.control.setStretchFactor(0, 2)
+
+            self._widget2 = CustomWidget(editor=self)
+            self.control.addWidget(self._widget2)
+
             self._ui = self.edit_traits(
                 parent=self.control,
                 kind="subpanel",
                 view=View(Item("_", label="DUMMY"), width=100, height=100),
             )
             print("nested UI control", self._ui.control)
-            self._filter = _EventFilter()
-            self._ui.control.installEventFilter(self._filter)
             self.control.addWidget(self._ui.control)
 
-            button = QtGui.QPushButton()
-            button.setText("Close UI")
-            self.control.addWidget(button)
-            button.clicked.connect(self._on_clicked)
+            self._button = QtGui.QPushButton()
+            self._button.setText("Close UI")
+            self._button.clicked.connect(self.dispose_inner_ui)
+            self.control.addWidget(self._button)
+
+            self._button2 = QtGui.QPushButton()
+            self._button2.setText("Close custom widget")
+            self._button2.clicked.connect(self.dispose_custom_widget)
+            self.control.addWidget(self._button2)
 
         def dispose(self):
-            self._ui.dispose()
+            self.dispose_inner_ui()
             super().dispose()
 
-        def _on_clicked(self):
-            self._ui.dispose()
+        def dispose_inner_ui(self):
+            if self._ui is not None:
+                print("Disposing inner UI")
+                self._ui.dispose()
+                self._ui = None
+                self._button.setParent(None)
+
+        def dispose_custom_widget(self):
+            if self._widget2 is not None:
+                print("Disposing custom widget")
+                self._widget2.setParent(None)
+                self._widget2.hide()
+                self._widget2.deleteLater()
+                self._button2.setParent(None)
+                self._widget2 = None
 
         def update_editor(self):
             pass
@@ -397,26 +421,93 @@ class TestUIDispose(unittest.TestCase):
             ),
         )
         ui = obj.edit_traits(view=view)
-        filter_ = _EventFilter()
-        ui.control.installEventFilter(filter_)
+        with ensure_closing(ui):
+            from pyface.api import GUI
+            gui = GUI()
+            gui.invoke_later(toolkit().close_control, ui.control)
+            with reraise_exceptions():
+                gui.start_event_loop()
+            self.assertIsNone(ui.control)
+
+    @requires_toolkit([ToolkitName.qt, ToolkitName.wx])
+    def test_dispose_inner_ui(self):
+        obj = DummyObject()
+        view = View(
+            Group(
+                Item(
+                    "number",
+                    editor=BasicEditorFactory(klass=EditorWithCustomWidget),
+                ),
+            ),
+        )
+        ui = obj.edit_traits(view=view)
+        editor, = ui.get_editors("number")
+
         from pyface.api import GUI
-        GUI().start_event_loop()
-        # with reraise_exceptions():
+        gui = GUI()
+        with ensure_closing(ui):
+            # This represents an event handler that causes a nested UI to be
+            # disposed.
+            gui.invoke_later(editor.dispose_inner_ui)
 
-        #     # create_ui is useful for other tests but not this one: it
-        #     # flushes the event loop prior to calling dispose. Here we want
-        #     # to test even if the event loop is not flushed before calling
-        #     # dispose, it would still be okay at the end.
-        #     ui = obj.edit_traits(view=view)
-        #     filter_ = _EventFilter()
-        #     ui.control.installEventFilter(filter_)
-        #     try:
-        #         ui.dispose()
-        #     finally:
-        #         process_cascade_events()
+            # Allowing GUI to process the disposal requests is crucial.
+            # This requirement should be satisfied in production setting
+            # where the dispose method is part of an event handler.
+            # Not doing so before disposing the main UI would be a programming
+            # error in tests settings.
+            with reraise_exceptions():
+                process_cascade_events()
+
+            gui.invoke_later(toolkit().close_control, ui.control)
+            with reraise_exceptions():
+                gui.start_event_loop()
+
+            self.assertIsNone(ui.control)
+
+    @requires_toolkit([ToolkitName.qt, ToolkitName.wx])
+    def test_dispose_custom_widget(self):
+        obj = DummyObject()
+        view = View(
+            Group(
+                Item(
+                    "number",
+                    editor=BasicEditorFactory(klass=EditorWithCustomWidget),
+                ),
+            ),
+        )
+        ui = obj.edit_traits(view=view)
+        gui = GUI()
+        with ensure_closing(ui):
+            editor, = ui.get_editors("number")
+            # This represents an event handler that causes a nested UI to be
+            # disposed.
+            gui.invoke_later(editor.dispose_custom_widget)
+            with reraise_exceptions():
+                process_cascade_events()
+
+            gui.invoke_later(toolkit().close_control, ui.control)
+            with reraise_exceptions():
+                gui.start_event_loop()
+            self.assertIsNone(ui.control)
 
 
-class _EventFilter(QtCore.QObject):
-    def eventFilter(self, source, event):
-        print(source, event)
-        return super().eventFilter(source, event)
+import contextlib
+
+@contextlib.contextmanager
+def ensure_closing(ui):
+    gui = GUI()
+    try:
+        yield
+    finally:
+        if ui.control is not None:
+            toolkit().destroy_control(ui.control)
+        with reraise_exceptions():
+            process_cascade_events()
+
+
+def get_qt_event_name(event):
+    event_to_name = {
+        event: name for name, event in vars(QtCore.QEvent).items()
+        if isinstance(event, int)
+    }
+    return event_to_name.get(event.type(), "Unknown")

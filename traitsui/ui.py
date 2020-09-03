@@ -276,10 +276,11 @@ class UI(HasPrivateTraits):
         # Hide the view control to minimize additional events being posted
         # while neighboring controls are removed as the UI enters an invalid
         # state.
-        toolkit().destroy_control(self.control)
-        # toolkit().hide_control(self.control)
+        #toolkit().hide_control(self.control)
+        #toolkit().hide_children(self.control)
         # self.control.setParent(None)
         # Reset the contents of the user interface
+        toolkit().destroy_control(self.control)
         self.reset(destroy=False)
 
         # Make sure that 'visible', 'enabled', and 'checked' handlers are not
@@ -295,7 +296,7 @@ class UI(HasPrivateTraits):
 
         # Destroy the view control:
         self.control._object = None
-        # toolkit().destroy_control(self.control)
+        #toolkit().destroy_control(self.control)
         self.control = None
 
         # Dispose of any KeyBindings object we reference:

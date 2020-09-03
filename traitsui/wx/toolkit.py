@@ -438,6 +438,9 @@ class GUIToolkit(Toolkit):
             self.hide_control(child)
             self.hide_children(child)
 
+    def close_control(self, control):
+        return control.Close()
+
     def destroy_control(self, control):
         """ Destroys a specified GUI toolkit control.
         """
